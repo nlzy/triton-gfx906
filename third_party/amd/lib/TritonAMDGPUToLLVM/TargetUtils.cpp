@@ -38,6 +38,7 @@ ISAFamily deduceISAFamily(llvm::StringRef arch) {
 
 bool supportsVDot(llvm::StringRef arch) {
   switch (deduceISAFamily(arch)) {
+  case AMD::ISAFamily::VEGA20:
   case AMD::ISAFamily::CDNA1:
   case AMD::ISAFamily::CDNA2:
   case AMD::ISAFamily::CDNA3:
