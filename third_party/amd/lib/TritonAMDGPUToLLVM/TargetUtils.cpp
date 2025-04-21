@@ -19,10 +19,8 @@ ISAFamily deduceISAFamily(llvm::StringRef arch) {
     return ISAFamily::CDNA2;
   case llvm::AMDGPU::GK_GFX908:
     return ISAFamily::CDNA1;
-  case llvm::AMDGPU::GK_GFX900:
-  case llvm::AMDGPU::GK_GFX902:
   case llvm::AMDGPU::GK_GFX906:
-    return ISAFamily::GCN5;
+    return ISAFamily::VEGA20;
   default:
     break;
   }
