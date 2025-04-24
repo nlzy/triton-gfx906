@@ -1,8 +1,9 @@
-#ifndef TRITON_CONVERSION_TRITONGPU_TO_LLVM_TARGETINFOAMD_H
-#define TRITON_CONVERSION_TRITONGPU_TO_LLVM_TARGETINFOAMD_H
+#ifndef TRITON_THIRD_PARTY_AMD_LIB_TRITONAMDGPUTOLLVM_TARGETINFO_H_
+#define TRITON_THIRD_PARTY_AMD_LIB_TRITONAMDGPUTOLLVM_TARGETINFO_H_
 
 #include "TritonAMDGPUToLLVM/TargetUtils.h"
 #include "triton/Conversion/TritonGPUToLLVM/TargetInfoBase.h"
+#include "llvm/TargetParser/TargetParser.h"
 #include <string>
 
 namespace mlir::triton::AMD {
@@ -11,6 +12,8 @@ public:
   explicit TargetInfo(std::string arch) : arch(std::move(arch)) {}
 
   ISAFamily getISAFamily() const { return deduceISAFamily(arch); }
+
+  llvm::AMDGPU::GPUKind getGPUKind() const;
 
   int getSharedMemorySize() const;
 
@@ -27,6 +30,12 @@ public:
   Value loadDShared(RewriterBase &rewriter, Location loc, Value ptr,
                     std::optional<Value> ctaId, Type elemTy,
                     Value pred) const override;
+  bool canUseLDSTransLoad(int bitwidth) const;
+
+  bool canUseStMatrix(RankedTensorType tensorTy, ArrayRef<unsigned> repShape,
+                      ArrayRef<unsigned> paddedRepShape,
+                      ArrayRef<unsigned> order,
+                      int swizzleByteSize) const override;
   void storeMatrixShared(RewriterBase &rewriter, Location loc, Value ptr,
                          Value val) const override;
 
@@ -49,23 +58,33 @@ public:
   std::string getMulhiFuncName(Type resultElementTy) const override;
 
   void printf(RewriterBase &rewriter, Value formatStrStart,
-              int formatStrByteCount, ValueRange args) const override;
+              int formatStrByteCount, ValueRange args,
+              ArrayRef<bool> isSigned = {}) const override;
 
-  void printf(RewriterBase &rewriter, StringRef msg,
-              ValueRange args) const override;
+  void printf(RewriterBase &rewriter, StringRef msg, ValueRange args,
+              ArrayRef<bool> isSigned = {}) const override;
 
   void assertFail(RewriterBase &rewriter, Location loc, StringRef message,
                   StringRef file, StringRef func, int line) const override;
+
   int getSharedAddressSpace() const override;
+
+  int getAddressSpace(Attribute addressSpace) const override;
 
   bool supportVectorizedAtomics() const override;
 
+  void storeOpAnnotation(triton::gpu::LocalStoreOp op, size_t localStoreOpCount,
+                         Type type) const override;
+
+  bool supportsDirectToLdsLoadBitWidth(int bitWidth) const;
+
 private:
   void printfImpl(Value formatStrStart, int formatStrByteCount, ValueRange args,
-                  RewriterBase &rewriter, bool useStdErr) const;
+                  ArrayRef<bool> isSigned, RewriterBase &rewriter,
+                  bool useStdErr) const;
 
   std::string arch;
 };
 } // namespace mlir::triton::AMD
 
-#endif // TRITON_CONVERSION_TRITONGPU_TO_LLVM_TARGETINFOAMD_H
+#endif // TRITON_THIRD_PARTY_AMD_LIB_TRITONAMDGPUTOLLVM_TARGETINFO_H_

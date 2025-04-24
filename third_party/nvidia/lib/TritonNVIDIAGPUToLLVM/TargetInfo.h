@@ -23,6 +23,12 @@ public:
   Value loadDShared(RewriterBase &rewriter, Location loc, Value ptr,
                     std::optional<Value> ctaId, Type elemTy,
                     Value pred) const override;
+
+  bool canUseStMatrix(RankedTensorType tensorTy, ArrayRef<unsigned> repShape,
+                      ArrayRef<unsigned> paddedRepShape,
+                      ArrayRef<unsigned> order,
+                      int swizzleByteSize) const override;
+
   void storeMatrixShared(RewriterBase &rewriter, Location loc, Value ptr,
                          Value val) const override;
 
@@ -45,16 +51,23 @@ public:
   std::string getMulhiFuncName(Type resultElementTy) const override;
 
   void printf(RewriterBase &rewriter, Value formatStrStart,
-              int formatStrByteCount, ValueRange args) const override;
+              int formatStrByteCount, ValueRange args,
+              ArrayRef<bool> isSigned = {}) const override;
 
-  void printf(RewriterBase &rewriter, StringRef msg,
-              ValueRange args) const override;
+  void printf(RewriterBase &rewriter, StringRef msg, ValueRange args,
+
+              ArrayRef<bool> isSigned = {}) const override;
 
   void assertFail(RewriterBase &rewriter, Location loc, StringRef message,
                   StringRef file, StringRef func, int line) const override;
+
   int getSharedAddressSpace() const override;
 
+  int getAddressSpace(Attribute addressSpace) const override;
+
   bool supportVectorizedAtomics() const override;
+
+  int getPtxVersion() const { return ptxVersion; }
 
 private:
   int computeCapability;

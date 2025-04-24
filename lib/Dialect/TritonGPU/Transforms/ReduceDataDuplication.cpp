@@ -36,7 +36,7 @@ public:
       auto srcType = cast<RankedTensorType>(cvtOp.getSrc().getType());
       auto dstType = cast<RankedTensorType>(cvtOp.getType());
       auto srcEncoding = srcType.getEncoding();
-      if (isa<triton::gpu::SharedEncodingAttr>(srcEncoding))
+      if (isa<triton::gpu::SharedEncodingTrait>(srcEncoding))
         return;
       auto dstDotOp =
           dyn_cast<triton::gpu::DotOperandEncodingAttr>(dstType.getEncoding());
@@ -44,23 +44,23 @@ public:
         return;
       if (!cvtNeedsSharedMemory(srcType, dstType))
         return;
-      auto srcThreadOrder = triton::gpu::getThreadOrder(srcEncoding);
-      auto rank = srcThreadOrder.size();
+      auto srcOrder = triton::gpu::getOrder(srcType);
+      auto rank = srcOrder.size();
       SmallVector<unsigned> sharedOrder;
       if (rank == 3) {
         // add all elements except the element that is zero
         for (unsigned i = 0; i < rank; ++i)
-          if (srcThreadOrder[i] != 0)
-            sharedOrder.emplace_back(srcThreadOrder[i]);
+          if (srcOrder[i] != 0)
+            sharedOrder.emplace_back(srcOrder[i]);
         sharedOrder.emplace_back(0);
       } else {
-        sharedOrder = srcThreadOrder;
+        sharedOrder = srcOrder;
       }
       auto sharedMemorySpace =
           triton::gpu::SharedMemorySpaceAttr::get(srcType.getContext());
-      auto tmpType = triton::MemDescType::get(
+      auto tmpType = triton::gpu::MemDescType::get(
           dstType.getShape(), dstType.getElementType(),
-          triton::gpu::SharedEncodingAttr::get(
+          triton::gpu::SwizzledSharedEncodingAttr::get(
               mod.getContext(), dstDotOp, srcType.getShape(), sharedOrder,
               triton::gpu::getCTALayout(srcEncoding), srcType.getElementType()),
           sharedMemorySpace);

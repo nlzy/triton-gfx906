@@ -27,11 +27,12 @@ public:
 public:
   AxisInfo() : AxisInfo({}, {}, {}) {}
 
-  AxisInfo(DimVectorT contiguity, DimVectorT divisibility, DimVectorT constancy)
+  AxisInfo(ArrayRef<int64_t> contiguity, ArrayRef<int64_t> divisibility,
+           ArrayRef<int64_t> constancy)
       : AxisInfo(contiguity, divisibility, constancy, std::nullopt) {}
 
-  AxisInfo(DimVectorT contiguity, DimVectorT divisibility, DimVectorT constancy,
-           std::optional<int64_t> constantValue)
+  AxisInfo(ArrayRef<int64_t> contiguity, ArrayRef<int64_t> divisibility,
+           ArrayRef<int64_t> constancy, std::optional<int64_t> constantValue)
       : contiguity(contiguity), divisibility(divisibility),
         constancy(constancy), constantValue(constantValue) {
     assert(divisibility.size() == contiguity.size());
@@ -201,8 +202,9 @@ public:
     return &(it->second);
   }
 
-  unsigned getPtrContiguity(Value ptr);
-  unsigned getPtrAlignment(Value ptr);
+  unsigned getContiguity(Value value);
+  unsigned getAlignment(Value value);
+
   unsigned getMaskAlignment(Value mask);
 
 private:

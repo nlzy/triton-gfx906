@@ -4,6 +4,7 @@
 #include "triton/Conversion/MLIRTypes.h"
 
 namespace mlir::triton {
+
 class TargetInfoBase {
 public:
   virtual bool supportMaximumMinimum() const = 0;
@@ -37,6 +38,12 @@ public:
                        pred);
   }
 
+  virtual bool canUseStMatrix(RankedTensorType tensorTy,
+                              ArrayRef<unsigned> repShape,
+                              ArrayRef<unsigned> paddedRepShape,
+                              ArrayRef<unsigned> order,
+                              int swizzleByteSize) const = 0;
+
   virtual void storeMatrixShared(RewriterBase &rewriter, Location loc,
                                  Value ptr, Value val) const = 0;
 
@@ -63,7 +70,8 @@ public:
   // the format string global variable; |args| are the arguments to fill
   // placeholders in the format string.
   virtual void printf(RewriterBase &rewriter, Value formatStrStart,
-                      int formatStrByteCount, ValueRange args) const = 0;
+                      int formatStrByteCount, ValueRange args,
+                      ArrayRef<bool> isSigned = {}) const = 0;
 
   // Emits LLVM code with |rewriter| to print a message, particularly useful for
   // backend debug. |msg| is the message to print, |args| are the arguments to
@@ -71,8 +79,8 @@ public:
   // NOTE: This function is used for backend debug. DO NOT DELETE.
   // Example use: targetInfo.printf(rewriter,"index: %d, value: %f", {index,
   // value});
-  virtual void printf(RewriterBase &rewriter, StringRef msg,
-                      ValueRange args) const = 0;
+  virtual void printf(RewriterBase &rewriter, StringRef msg, ValueRange args,
+                      ArrayRef<bool> isSigned = {}) const = 0;
 
   // Emits LLVM code with |rewriter| to perform assertion failure with the given
   // |message| from the given |func| in |file|.
@@ -82,7 +90,14 @@ public:
 
   virtual int getSharedAddressSpace() const = 0;
 
+  virtual int getAddressSpace(Attribute addressSpace) const = 0;
+
   virtual bool supportVectorizedAtomics() const = 0;
+
+  // Helper used by targets to annotate store operations during lowering to
+  // llvm.
+  virtual void storeOpAnnotation(triton::gpu::LocalStoreOp op,
+                                 size_t localStoreOpCount, Type type) const {}
 
   virtual ~TargetInfoBase() {}
 };

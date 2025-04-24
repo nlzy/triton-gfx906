@@ -92,11 +92,14 @@ class OptimizeAMDLDSUsage
     auto srcType = cvtOp.getSrc().getType();
     auto dstType = cvtOp.getType();
 
-    auto srcEnc = srcType.getEncoding();
-    auto dstEnc = dstType.getEncoding();
+    auto srcEnc =
+        cast<triton::gpu::DistributedEncodingTrait>(srcType.getEncoding());
+    auto dstEnc =
+        cast<triton::gpu::DistributedEncodingTrait>(dstType.getEncoding());
 
     auto ctx = srcEnc.getContext();
-    auto rank = srcType.getShape().size();
+    auto rank = srcType.getRank();
+
     unsigned numWarps = triton::gpu::getNumWarpsPerCTA(srcEnc);
     auto warpSize = triton::gpu::getWarpSize(srcEnc);
 
@@ -109,22 +112,34 @@ class OptimizeAMDLDSUsage
     // Create a list of temporary layouts
     SmallVector<unsigned> elemsPerThread(rank, 1);
     SmallVector<unsigned> threadsPerWarp(rank, 1);
-    threadsPerWarp[rank - 1] = warpSize / 8;
-    threadsPerWarp[rank - 2] = warpSize / threadsPerWarp[rank - 1];
+
+    // Special case for rank == 1
+    if (rank == 1) {
+      threadsPerWarp[0] = warpSize;
+    } else {
+      assert(rank > 1);
+      threadsPerWarp[rank - 1] = warpSize / 8;
+      threadsPerWarp[rank - 2] = warpSize / threadsPerWarp[rank - 1];
+    }
+
     auto layoutCTA = triton::gpu::getCTALayout(srcEnc);
-    auto order = triton::gpu::getOrder(srcEnc);
+    auto order = triton::gpu::getOrder(srcType);
     SmallVector<unsigned> dummyWarpsPerCTA(rank, 1);
+
     auto baseFallbackLayout = triton::gpu::BlockedEncodingAttr::get(
         ctx, elemsPerThread, threadsPerWarp, dummyWarpsPerCTA, order,
         layoutCTA);
     SmallVector<Attribute> tmpLayouts;
     for (int i = 0; i < factorizedNumWarps.size(); i++) {
       auto warpsPerCTA = factorizedNumWarps[i];
-      tmpLayouts.push_back(
-          mlir::triton::AMD::createTmpLayout(srcEnc, warpsPerCTA));
-      tmpLayouts.push_back(
-          mlir::triton::AMD::createTmpLayout(dstEnc, warpsPerCTA));
-      tmpLayouts.push_back(
+      auto pushNotNull = [&](Attribute enc) {
+        if (enc)
+          tmpLayouts.push_back(enc);
+      };
+
+      pushNotNull(mlir::triton::AMD::createTmpLayout(srcEnc, warpsPerCTA));
+      pushNotNull(mlir::triton::AMD::createTmpLayout(dstEnc, warpsPerCTA));
+      pushNotNull(
           mlir::triton::AMD::createTmpLayout(baseFallbackLayout, warpsPerCTA));
     }
 
