@@ -474,6 +474,7 @@ void TargetInfo::storeOpAnnotation(triton::gpu::LocalStoreOp op,
 
 bool TargetInfo::supportsDirectToLdsLoadBitWidth(int bitWidth) const {
   switch (getISAFamily()) {
+  case ISAFamily::VEGA20:
   case ISAFamily::CDNA1:
   case ISAFamily::CDNA2:
   case ISAFamily::CDNA3:
