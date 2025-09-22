@@ -1731,6 +1731,36 @@ def test_tensor_atomic_add_non_exclusive_offset(size, num_ctas, dtype_x_str, dev
 
 
 @pytest.mark.interpreter
+@pytest.mark.parametrize("size, num_ctas, dtype_x_str", [(size, num_ctas, dtype_x_str)
+                                                         for size in [2, 4, 8, 32, 64, 128]
+                                                         for num_ctas in num_ctas_list
+                                                         for dtype_x_str in ['bfloat16', 'float16', 'float32']])
+def test_tensor_atomic_add_shift_1(size, num_ctas, dtype_x_str, device):
+    check_type_supported(dtype_x_str, device)
+
+    @triton.jit
+    def kernel(X, val, NUM: tl.constexpr):
+        off_x = tl.arange(0, 2)
+        off_y = tl.arange(0, NUM)
+        off_in = off_x[:, None] * NUM + off_y[None, :]
+        off_out = off_x[:, None] + off_y[None, :]
+
+        val = tl.load(val + off_in)
+        tl.atomic_add(X + off_out, val)
+
+    s = (2, size)
+    dtype = getattr(torch, dtype_x_str)
+    x = torch.zeros(s, dtype=dtype, device=device)
+    ref = torch.flatten(x)
+    val = torch.randn(s, dtype=dtype, device=device)
+    kernel[(1, )](x, val, size, num_warps=1, num_ctas=num_ctas)
+    val = torch.flatten(val)
+    ref[0:size] = val[0:size]
+    ref[1:size + 1] += val[size:2 * size]
+    torch.testing.assert_close(ref, torch.flatten(x))
+
+
+@pytest.mark.interpreter
 @pytest.mark.parametrize("shape, idx_order, mask_step, num_ctas, dtype_x_str",
                          [(shape, idx_order, mask_step, num_ctas, dtype_x_str)
                           for shape in [(2, 2), (4, 4), (5, 5), (6, 6), (8, 8)]
@@ -2398,6 +2428,13 @@ def get_reduced_dtype(dtype_str, op):
     return dtype_str
 
 
+def get_reduce_input(dtype_str, shape):
+    # limit the range of integers so that reduce ops do not overflow
+    low = 0 if dtype_str in uint_dtypes else -10 if dtype_str in integral_dtypes else None
+    high = 10 if dtype_str in integral_dtypes else None
+    return numpy_random(shape, dtype_str=dtype_str, low=low, high=high)
+
+
 @pytest.mark.interpreter
 @pytest.mark.parametrize("op, dtype_str, shape", [(op, dtype, shape) for op in [
     'min',
@@ -2428,9 +2465,7 @@ def test_reduce1d(op, dtype_str, shape, num_ctas, device):
         patch = f'z = tl.{op}(x, axis=0)'
     kernel = patch_kernel(kernel, {'GENERATE_TEST_HERE': patch})
     # input
-    rs = RandomState(17)
-    # limit the range of integers so that the sum does not overflow
-    x = numpy_random((shape, ), dtype_str=dtype_str, rs=rs)
+    x = get_reduce_input(dtype_str, (shape, ))
     numpy_op = {
         'sum': np.sum,
         'max': np.max,
@@ -2455,7 +2490,7 @@ def test_reduce1d(op, dtype_str, shape, num_ctas, device):
     else:
         z_ref = numpy_op(x).astype(getattr(np, z_dtype_str))
     # triton result
-    z_tri = to_triton(numpy_random((1, ), dtype_str=z_dtype_str, rs=rs), device=device, dst_type=z_tri_dtype_str)
+    z_tri = to_triton(numpy_random((1, ), dtype_str=z_dtype_str), device=device, dst_type=z_tri_dtype_str)
     kernel[(1, )](x_tri, z_tri, BLOCK=shape, num_ctas=num_ctas)
     z_tri = to_numpy(z_tri)
     # compare
@@ -2552,9 +2587,7 @@ def test_reduce(op, dtype_str, shape, axis, keep_dims, num_ctas, device):
 
     kernel = patch_kernel(kernel, {'GENERATE_TEST_HERE': f'tl.{op}(x, axis=AXIS, keep_dims=KEEP_DIMS)'})
     # input
-    rs = RandomState(17)
-    # limit the range of integers so that the sum does not overflow
-    x = numpy_random(shape, dtype_str=dtype_str, rs=rs)
+    x = get_reduce_input(dtype_str, shape)
     x_tri = to_triton(x, device=device)
     numpy_op = {
         'sum': np.sum, 'max': np.max, 'min': np.min, 'argmin': np.argmin, 'argmax': np.argmax, 'xor_sum':
@@ -2579,7 +2612,7 @@ def test_reduce(op, dtype_str, shape, axis, keep_dims, num_ctas, device):
 
     # triton result
     z_shape = z_ref.shape
-    z_tri = to_triton(numpy_random(z_shape, dtype_str=z_dtype_str, rs=rs), device=device, dst_type=z_tri_dtype_str)
+    z_tri = to_triton(numpy_random(z_shape, dtype_str=z_dtype_str), device=device, dst_type=z_tri_dtype_str)
     BLOCK_K = 1 if len(shape) == 2 else shape[2]
     IS_3D = bool(len(shape) == 3)
     USE_I1 = dtype_str == 'bool'
@@ -3181,8 +3214,7 @@ def test_reduce_layouts(M, N, src_layout, axis, epilogue_kind, dtype_str, add_ov
     temp_file.write_text(ir)
     kernel = triton.compile(str(temp_file))
 
-    rs = RandomState(17)
-    x = numpy_random((M, N), dtype_str=dtype_str, rs=rs, low=0, high=10)
+    x = get_reduce_input(dtype_str, (M, N))
     reduce2d = 'reduce2d' in epilogue_kind
     z_shape = (1, 1) if reduce2d else (1, N) if axis == 0 else (M, 1)
     z = np.zeros(z_shape).astype(dtype_str)
