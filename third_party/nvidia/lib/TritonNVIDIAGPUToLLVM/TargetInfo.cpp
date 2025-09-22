@@ -5,6 +5,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/LLVMIR/NVVMDialect.h"
+#include "triton/Dialect/TritonGPU/Transforms/Utility.h"
 #include "llvm/Support/MathExtras.h"
 
 using namespace mlir;
@@ -127,16 +128,13 @@ Value TargetInfo::ballot(RewriterBase &rewriter, Location loc, Type type,
                          Value cmp) const {
   auto b = TritonLLVMOpBuilder(loc, rewriter);
   Value threadMask = b.int_val(type.getIntOrFloatBitWidth(), -1);
-  return rewriter.create<NVVM::VoteBallotOp>(loc, type, threadMask, cmp);
+  return rewriter.create<NVVM::VoteSyncOp>(loc, type, threadMask, cmp,
+                                           NVVM::VoteSyncKind::ballot);
 }
 
 static Value mapa(RewriterBase &rewriter, Location loc, Value ptr, Value ctaid,
                   Value pred) {
-  Value args[] = {ptr, ctaid};
-  StringRef name = "llvm.nvvm.mapa.shared.cluster";
-  return LLVM::createLLVMIntrinsicCallOp(rewriter, loc, name, ptr.getType(),
-                                         args)
-      .getResult(0);
+  return rewriter.create<NVVM::MapaOp>(loc, ptr.getType(), ptr, ctaid);
 }
 
 static std::string getConstraintForBitwidth(unsigned bitwidth) {
@@ -155,7 +153,7 @@ static std::string getConstraintForBitwidth(unsigned bitwidth) {
 
 static bool isConstantTruePred(Value pred) {
   if (auto constOp = pred.getDefiningOp<LLVM::ConstantOp>()) {
-    return cast<IntegerAttr>(constOp.getValue()).getInt() != 0;
+    return cast<IntegerAttr>(constOp.getValue()).getInt() == -1;
   }
   return false;
 }
@@ -232,7 +230,7 @@ void TargetInfo::storeDShared(RewriterBase &rewriter, Location loc, Value ptr,
     SmallVector<Value> vals = unpackLLVector(loc, val, rewriter);
     for (int i = 0; i < vec / maxVec; i++) {
       auto newPtr = b.gep(ptr.getType(), elemTy, ptr, b.i32_val(i * maxVec),
-                          /*inbounds=*/true);
+                          LLVM::GEPNoWrapFlags::inbounds);
       storeDShared(
           rewriter, loc, newPtr, ctaId,
           packLLVector(loc, ArrayRef(vals).slice(i * maxVec, maxVec), rewriter),
@@ -260,19 +258,23 @@ void TargetInfo::storeDShared(RewriterBase &rewriter, Location loc, Value ptr,
                 .b(elemBitwidth);
   auto *ptrOpr = builder.newAddrOperand(ptr, "r");
 
-  PTXBuilder::Operand *valOpr;
-  std::string constraint = getConstraintForBitwidth(elemBitwidth);
-  if (vec > 1) {
-    SmallVector<std::pair<Value, std::string>> vecVals;
-    for (int i = 0; i < vec; i++) {
-      vecVals.push_back({b.extract_element(val, b.i32_val(i)), constraint});
-    }
-    valOpr = builder.newListOperand(vecVals);
+  if (isConstantTruePred(pred)) {
+    b.store(val, ptr, /*align=*/vec * elemBitwidth / 8);
   } else {
-    valOpr = builder.newOperand(val, constraint);
+    PTXBuilder::Operand *valOpr;
+    std::string constraint = getConstraintForBitwidth(elemBitwidth);
+    if (vec > 1) {
+      SmallVector<std::pair<Value, std::string>> vecVals;
+      for (int i = 0; i < vec; i++) {
+        vecVals.push_back({b.extract_element(val, b.i32_val(i)), constraint});
+      }
+      valOpr = builder.newListOperand(vecVals);
+    } else {
+      valOpr = builder.newOperand(val, constraint);
+    }
+    st(ptrOpr, valOpr).predicate(pred, "b");
+    builder.launch(rewriter, loc, void_ty(ctx));
   }
-  st(ptrOpr, valOpr).predicate(pred, "b");
-  builder.launch(rewriter, loc, void_ty(ctx));
 }
 
 Value TargetInfo::loadDShared(RewriterBase &rewriter, Location loc, Value ptr,
@@ -345,7 +347,7 @@ Value TargetInfo::loadDShared(RewriterBase &rewriter, Location loc, Value ptr,
     SmallVector<Value> vals;
     for (int i = 0; i < vec / maxVec; i++) {
       auto newPtr = b.gep(ptr.getType(), elemTy, ptr, b.i32_val(i * maxVec),
-                          /*inbounds=*/true);
+                          LLVM::GEPNoWrapFlags::inbounds);
       auto newVal = loadDShared(rewriter, loc, newPtr, ctaId,
                                 vec_ty(elemTy, maxVec), pred);
       for (Value v : unpackLLVector(loc, newVal, rewriter)) {
@@ -377,7 +379,7 @@ Value TargetInfo::loadDShared(RewriterBase &rewriter, Location loc, Value ptr,
   if (isConstantTruePred(pred)) {
     Type resultTy = vec == 1 ? Type(int_ty(elemBitwidth))
                              : Type(vec_ty(int_ty(elemBitwidth), vec));
-    load = b.load(resultTy, ptr);
+    load = b.load(resultTy, ptr, /*align=*/vec * elemBitwidth / 8);
     if (vec > 1) {
       Type structTy = struct_ty(SmallVector<Type>(vec, int_ty(elemBitwidth)));
       Value structValue = b.undef(structTy);
@@ -491,6 +493,12 @@ bool TargetInfo::canUseStMatrix(RankedTensorType tensorTy,
   if (tensorTy.getElementType().getIntOrFloatBitWidth() != 16)
     return false;
   if (order[0] != 1)
+    return false;
+
+  // Each chunk is filled in with a single warp
+  int numColsPerChunk = (8 * swizzleByteSize) / getElementBitWidth(tensorTy);
+  int instrN = mmaLayout.getInstrShape()[1];
+  if (instrN < numColsPerChunk)
     return false;
 
   auto tensorShapePerCTA = getShapePerCTA(mmaLayout, tensorTy.getShape());
