@@ -19,6 +19,8 @@ public:
 
   bool isRDNA() const;
 
+  bool isVEGA20() const;
+
   int getWarpSize() const;
 
   int getSharedMemorySize() const;
