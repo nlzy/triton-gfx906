@@ -93,6 +93,17 @@ bool TargetInfo::isRDNA() const {
   return false;
 }
 
+bool TargetInfo::isVEGA20() const {
+  switch (getISAFamily()) {
+  case ISAFamily::VEGA20:
+    return true;
+  default:
+    break;
+  }
+
+  return false;
+}
+
 int TargetInfo::getWarpSize() const { return isCDNA() ? 64 : 32; }
 
 int TargetInfo::getSharedMemorySize() const {
@@ -336,7 +347,7 @@ bool TargetInfo::warpReduce(RewriterBase &rewriter, Location loc,
     buf = createDppReduxOpWithBoundCtrl(valType, buf, 1 + dppCtrlRowShr,
                                         allRows, allBanks);
 
-    if (isCDNA()) {
+    if (isCDNA() || isVEGA20()) {
       // row_bcast:15 row_mask:0xa
       buf = createDppReduxOpWithBoundCtrl(
           valType, buf, static_cast<uint32_t>(DppCtrl::BCAST15), 0xa, allBanks);
