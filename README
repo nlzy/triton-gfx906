@@ -13,8 +13,7 @@ cd triton-gfx906
 python3 -m venv tritonenv
 source tritonenv/bin/activate
 
-pip3 install 'torch==2.8' torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.3
-pip3 install ninja 'cmake<4' wheel pybind11
+pip3 install -r python/requirements.txt
 
 pip3 install --no-build-isolation .
 ```
