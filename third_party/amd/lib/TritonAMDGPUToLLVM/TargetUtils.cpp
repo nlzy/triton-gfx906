@@ -54,6 +54,7 @@ bool supportsVDot(llvm::StringRef arch) {
 
 bool isCDNA(ISAFamily isaFamily) {
   switch (isaFamily) {
+  case AMD::ISAFamily::VEGA20:
   case ISAFamily::CDNA1:
   case ISAFamily::CDNA2:
   case ISAFamily::CDNA3:
