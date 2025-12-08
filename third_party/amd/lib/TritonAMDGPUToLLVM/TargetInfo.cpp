@@ -68,6 +68,7 @@ llvm::AMDGPU::GPUKind TargetInfo::getGPUKind() const {
 
 bool TargetInfo::isCDNA() const {
   switch (getISAFamily()) {
+  case ISAFamily::VEGA20:
   case ISAFamily::CDNA1:
   case ISAFamily::CDNA2:
   case ISAFamily::CDNA3:
